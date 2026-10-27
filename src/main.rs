@@ -1,4 +1,3 @@
-use std::print;
 extern crate nalgebra as na;
 extern crate image;
 use image::{GenericImageView, GrayImage, ImageFormat, imageops, Luma};
@@ -9,66 +8,90 @@ fn main() {
         panic!("Failed to open: {}", e);
     });
 
-    //Dimensoes
+    // Dimensoes
     let (width, height) = img.dimensions();
-    let total_pixels = (width * height) as u64;
 
-    println!("Dimensoes = {width} {height}");//Para posterior comparacao 
+    //Para posterior comparacao 
+    println!("Dimensoes = {width} {height}");
 
-    let mut cinza = img.into_luma8(); //Grayscale
+    // Grayscale
+    let mut cinza = img.into_luma8(); 
 
-    //Função para calular limiar, recebe a referencia da imagem e o total de pixels, retorna o limiar em u64
-
-    fn lim_calc(imagem: &GrayImage, total_pixels: u64) -> u64 {
-
-        let mut soma: u64 = imagem.as_raw() // Somatorio dos valores da imagem
-        .iter()
-        .map(|&valor| valor as u64)
-        .sum();
-
-        let mut t: u64 = (soma / total_pixels) as u64; //Limiar
-
-        loop{ //Repetir até t parar de ser alterado
-
-            soma = 0; 
-
-            let mut soma2: u64 = 0;
-            let mut qtd_menores: u64 = 0;
-            let mut qtd_maiores: u64 = 0;
+    // Função para limiarizar a imagem, recebe a referencia da imagem e o total de pixels, retorna o limiar em u64
+    fn lim_img(imagem: &mut GrayImage, width: u32, height: u32) {
         
-            for &valor in imagem.as_raw() { 
-                if valor as u64 <= t {      // Se menor ou igual a t
-                    soma += valor as u64;
-                    qtd_menores += 1;
-                } else {                    // Se maiores que t
-                    soma2 += valor as u64;
-                    qtd_maiores += 1;
+        let block_height = height/4;
+        let block_width = width/8;
+        let block_size = block_width*block_height;
+        let mut t:u32;
+        let mut soma: u32;
+        let mut soma2: u32;
+        let mut qtd_menores: u32;
+        let mut qtd_maiores: u32;
+        let mut t2: u32;
+        let mut t3: u32;
+        let mut novot: u32;
+        for i in 0..3{ // Para cada bloco
+            for j in 0..7{
+
+                // Calcula a soma da intensidade do bloco
+                soma = 0;
+                for y in i*block_height..(i*block_height)+block_height{
+                    for x in j*block_width..(j*block_width)+block_width{
+                        soma += imagem.get_pixel(x,y).0[0] as u32;
+                    }
+                }
+
+                // Limiar inicial 
+                t = soma/block_size; 
+                
+                // Calculo adaptativo do limiar t
+                loop{
+                    soma = 0; 
+
+                    soma2 = 0;
+                    qtd_menores = 0;
+                    qtd_maiores = 0;
+                
+                    for y in i*block_height..(i*block_height)+block_height{
+                    for x in j*block_width..(j*block_width)+block_width{
+                            if imagem.get_pixel(x,y).0[0] as u32 <= t {   // Se menor ou igual a t
+                                soma += imagem.get_pixel(x,y).0[0] as u32;
+                                qtd_menores += 1;
+                            } else {                                      // Se maiores que t
+                                soma2 += imagem.get_pixel(x,y).0[0] as u32;
+                                qtd_maiores += 1;
+                            }
+                        }
+                    } 
+                        
+                    t2 = if qtd_menores > 0 { soma / qtd_menores } else { 0 };
+                    t3 = if qtd_maiores > 0 { soma2 / qtd_maiores } else { 0 };
+
+                    novot= (t2+t3)/2;
+
+                    if t!=novot{ 
+                        t=novot;
+                        break;
+                    }
+                }
+                println!("Limiar calculado: {t}");
+
+                for y in i*block_height..(i*block_height)+block_height{ // Limiariza a imagem
+                    for x in j*block_width..(j*block_width)+block_width{
+                        if imagem.get_pixel(x,y).0[0] > t as u8 {
+                            imagem.put_pixel(x,y, Luma([0])); 
+                        } else {
+                            imagem.put_pixel(x,y, Luma([255]));
+                        }
+                    }
                 }
             }
-
-            let t2: u64 = if qtd_menores > 0 { soma / qtd_menores } else { 0 };
-            let t3: u64 = if qtd_maiores > 0 { soma2 / qtd_maiores } else { 0 };
-
-            let novot: u64 = (t2+t3)/2;
-
-            if t!=novot{
-                t=novot;
-                break;
-            }
-        }
-
-        return t;
+            println!("i mudado");
+        }   
     }
 
-    let lim = lim_calc(&cinza, total_pixels); //Calcula limiar
-
-    for valor in cinza.iter_mut() { //Limiarização
-        if *valor > lim as u8 {
-            *valor = 0; 
-        } else {
-            *valor = 255;
-        }
-    }
+    lim_img(&mut cinza, width, height);
     cinza.save_with_format("src/images/Limiarizado.bmp", ImageFormat::Bmp).ok();
 
     /*
@@ -78,7 +101,7 @@ fn main() {
     */
     fn border_mask(a: &mut GrayImage, w: u32, h: u32){
 
-        let mut a_padded = GrayImage::from_pixel(w+2, h+2, Luma([255]));
+        let mut a_padded = GrayImage::from_pixel(w+2, h+2, Luma([0])); // Nova imagem preta
 
         // Insercao da imagem a dentro do fundo de padding
         for y in 1..(h+1) {
@@ -87,43 +110,53 @@ fn main() {
             }
         }
 
-        //imageops::replace(&mut a_padded, a, 1, 1); //Imagem com zero padding
-        
-        let mut eroded_a = GrayImage::from_pixel(w, h, Luma([255])); // Nova imagem preta
+        let mut eroded_a = GrayImage::from_pixel(w+2, h+2, Luma([0])); // Nova imagem preta
 
-        // Erosão com elemento B em cruz (Tornou-se uma Dilatacao apesar da logica ser de erosao)
+        //Erosao com elemento B em cruz
         for y in 1..(h+1) {
             for x in 1..(w+1) {
-                if a_padded.get_pixel(x, y).0[0] == 0 && a_padded.get_pixel(x-1, y).0[0] == 0 && a_padded.get_pixel(x+1, y).0[0] == 0 && a_padded.get_pixel(x,y-1).0[0] == 0 && a_padded.get_pixel(x, y+1).0[0] == 0  { //Elemento B simulado pro comparação posicional
-                    eroded_a.put_pixel(x-1,y-1, image::Luma([0]));
-                }
-                else{
-                    eroded_a.put_pixel(x-1,y-1, image::Luma([255]));
-                }
+                //Elemento B simulado por comparacao de coordenadas
+                if a_padded.get_pixel(x, y).0[0] == 255 &&  
+                   a_padded.get_pixel(x-1, y).0[0] == 255 && a_padded.get_pixel(x+1, y).0[0] == 255 && 
+                   a_padded.get_pixel(x,y-1).0[0] == 255 && a_padded.get_pixel(x, y+1).0[0] == 255 
+                   { 
+                    eroded_a.put_pixel(x,y, image::Luma([255]));
+                }        
             }
         }
-        
-        eroded_a.save_with_format("src/images/Dilatada.bmp", ImageFormat::Bmp).ok();
     
-        //Adição com imagem original
-        for y in 0..(h) {
-            for x in 0..(w) {
-                if eroded_a.get_pixel(x, y).0[0] == 255 && a.get_pixel(x, y).0[0] == 0{
-                    a.put_pixel(x, y, image::Luma([255]));
-                }
-                else{
-                    a.put_pixel(x, y, image::Luma([0]));
-                }
+        eroded_a.save_with_format("src/images/Erodida.bmp", ImageFormat::Bmp).ok();
+        
+        //Diferença da imagem original
+        let iter = eroded_a.as_mut().iter_mut().zip(a_padded.as_raw().iter());
+
+        for (eroded_a, &a_padded) in iter {
+            if a_padded == 255 && *eroded_a == 0{
+                *eroded_a= 255;
+            } 
+            else{
+                *eroded_a=0;
             }
         }
-        a.save_with_format("src/images/Mascara.bmp", ImageFormat::Bmp).ok(); 
+
+        eroded_a.save_with_format("src/images/Mascara.bmp", ImageFormat::Bmp).ok();
+        
     }
     
     border_mask(&mut cinza, width, height); // Cria a mascara sobre a imagem cinza
 
     //Seguidor de bordas
-    fn border_follower(imagem: &mut GrayImage, h :u32, w :u32){
+    // fn border_follower(imagem: &mut GrayImage, h :u32, w :u32){
+    //     let mut marcado = (0,0);
+    //     let vector![];
 
-    }
+    //     for y in 1..h+1{
+    //         for x in 1..w+1{
+    //             if imagem.get_pixel(x,y).0[0]==255{
+
+    //             }
+    //         }
+    //     }
+    // }
 
 }
