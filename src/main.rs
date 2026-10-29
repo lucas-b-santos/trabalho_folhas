@@ -163,14 +163,14 @@ fn main() {
                     counter=0; 
 
                     let offsets_horario: [(u32, u32); 8] = [
-                        (x, y-1), 
+                        (x-1, y),
+                        (x-1, y-1), 
+                        (x, y-1),
                         (x+1, y-1),
                         (x+1, y), 
                         (x+1, y+1), 
                         (x, y+1), 
-                        (x-1, y+1), 
-                        (x-1, y), 
-                        (x-1, y-1)
+                        (x-1, y+1)
                     ];  
 
                     for &(dx, dy) in &offsets_horario {
@@ -180,7 +180,7 @@ fn main() {
                             imagem2.put_pixel(x,y,image::Rgba::<u8>([255,0,0,255]));
                             border.push((x,y));
                         }
-                        else if (dx,dy) == coords_ini && counter>300{ // Borda deve ser cíclia e ter mais de 50 pixels
+                        else if (dx,dy) == coords_ini && counter>300{ // Borda deve ser cíclia e ter mais de 300 pixels
                             break;
                         }
                     }
