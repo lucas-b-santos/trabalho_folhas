@@ -149,8 +149,9 @@ fn main() {
         let mut lista_coords: Vec<Vec<(u32,u32)>> = Vec::with_capacity(8); // Lista de listas
 
         let mut counter; 
-        for mut y in 1..(h+1){ // Percorre a imagem
-            for mut x in 1..(w+1){
+        
+        for y in 1..(h+1){ // Percorre a imagem
+            for x in 1..(w+1){
 
                 if imagem.get_pixel(x,y).0[0]==255{ // Pixel upper-left most
 
@@ -176,8 +177,6 @@ fn main() {
                         if imagem.get_pixel(dx,dy).0[0]==255{
                             counter+=1;
                             imagem.put_pixel(x,y,image::Luma([0]));
-                            x=dx;
-                            y=dy;
                             imagem2.put_pixel(x,y,image::Rgba::<u8>([255,0,0,255]));
                             border.push((x,y));
                         }
@@ -186,8 +185,6 @@ fn main() {
                         }
                     }
                     lista_coords.push(border);
-                    x=coords_ini.0; // x e y voltam para o upper-left most
-                    y=coords_ini.1;
                 }
             }
         }
