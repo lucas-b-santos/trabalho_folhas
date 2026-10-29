@@ -138,7 +138,7 @@ fn main() {
     border_mask(&mut cinza, &mut cinza_2, width, height); // Cria a mascara sobre a imagem cinza
 
     /* Seguidor de bordas, recebe a imagem da máscara (grayscale/GrayImage), a imagem original, altura e largura
-       modifica a imagem original com as bordas e retorna as listas de bordas encontradas
+       insere bordas na imagem original e retorna as listas de bordas encontradas
     */ 
     fn border_follower(imagem: &mut GrayImage, imagem2: &mut DynamicImage, w :u32, h :u32){
 
