@@ -17,7 +17,9 @@ fn main() {
     // Grayscale
     let mut cinza = img.to_luma8();
 
-    // ALgoritmo de otsu
+    /* ====================================================================================================================================================================================================================
+    Algoritmo de otsu 
+    */
     fn otsu(img_cinza: &mut GrayImage) {
         let total_pixels = (img_cinza.width() * img_cinza.height()) as f64;
 
@@ -76,7 +78,8 @@ fn main() {
 
     let mut cinza_2 = GrayImage::from_pixel(width+2, height+2, Luma([0]));
     
-    /*
+    
+    /* ====================================================================================================================================================================================================================
     Procedimento para extrair contornos, recebe uma imagem no formato GrayImage, altura e largura em u32.
     Retorna a imagem resultante do processo de extracao de contornos: "a" - ("a" erodida por "b")
     sendo "b" um elemento estruturante em cruz simulado por comparacao de coordenadas
@@ -137,8 +140,9 @@ fn main() {
     
     border_mask(&mut cinza, &mut cinza_2, width, height); // Cria a mascara sobre a imagem cinza
 
-    /* Seguidor de bordas, recebe a imagem da máscara (grayscale/GrayImage), a imagem original, altura e largura
-       insere bordas na imagem original e retorna as listas de bordas encontradas
+    /* ==================================================================================================================================================================================================================== 
+    Seguidor de bordas, recebe a imagem da máscara (grayscale/GrayImage), a imagem original, altura e largura
+    insere bordas na imagem original e retorna as listas de bordas encontradas
     */ 
     fn border_follower(imagem: &mut GrayImage, imagem2: &mut DynamicImage, w :u32, h :u32){
 
