@@ -15,13 +15,15 @@ fn grayscale(image: &DynamicImage) -> GrayImage {
 fn otsu(img: &mut GrayImage) {
     let total_pixels = (img.width() * img.height()) as f64;
 
-    // 1. Histograma (frequência de cada nível de cinza)
+    // Histograma (frequência de cada nível de cinza)
     let mut histogram = [0u64; 256];
     for pixel in img.pixels() {
         histogram[pixel[0] as usize] += 1;
     }
 
-    // 2. Probabilidades (pi) e Média Global (Ut)
+    // Segundo Otsu (1979):
+    // - probabilidade de cada nível de cinza k: pi = frequencia_k / total_pixels (Equação 1)
+    // - média global: Ut = soma dos produtos dos níveis de cinza por suas probabilidades (Equação 8)
     let mut pi = [0.0f64; 256];
     let mut ut = 0.0f64;
     for i in 0..256 {
@@ -29,26 +31,24 @@ fn otsu(img: &mut GrayImage) {
         ut += i as f64 * pi[i];
     }
 
-    let mut w_k = 0.0f64; // Soma acumulada das probabilidades (w)
-    let mut u_k = 0.0f64; // Soma acumulada do produto nível * probabilidade (u)
+    let mut w_k = 0.0f64;  // w = soma das probabilidades até o nível k (inclusive) (OTSU, 1979, Eq. 2)
+    let mut u_k = 0.0f64; // u = soma do produto dos níveis de cinza por suas probabilidades até k (inclusive) (OTSU, 1979, Eq. 7
     let mut max_variance = -1.0f64;
     let mut limiar = 0u8;
 
-    // 3. Busca do limiar k que maximiza a variância entre classes
+    // Busca do limiar k que maximiza a variância entre classes (OTSU, 1979, Eq. 19)
     for k in 0..256 {
         w_k += pi[k];
         u_k += k as f64 * pi[k];
-
+        
+        // Otsu (1979) define o que ele chama de "intervalo efetivo"
+        // Isto é, valores de k onde => w(k) * (1 - w(k)) > 0 
         let w_background = w_k;
         let w_foreground = 1.0 - w_k;
-
-        // Intervalo efetivo: w(k) * (1 - w(k)) > 0
         if w_background > 0.0 && w_foreground > 0.0 {
-            // Equação da variância entre classes: ((Ut * w - u)^2) / (w * (1 - w))
+            // variância entre classes (OTSU, 1979, Eq. 18)
             let numerator = ut * w_background - u_k;
             let variance = (numerator * numerator) / (w_background * w_foreground);
-
-            // Mantém o comportamento do argmax (primeiro máximo encontrado)
             if variance > max_variance {
                 max_variance = variance;
                 limiar = k as u8;
