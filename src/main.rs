@@ -1,294 +1,254 @@
-extern crate nalgebra as na;
-extern crate image;
-use image::{DynamicImage, GenericImage, GenericImageView, GrayImage, ImageFormat, Luma};
+use std::path::PathBuf;
+pub mod pipeline;
+use pipeline::process_image;
 
-fn main() {
+use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
+use image::{GenericImageView, ImageFormat, RgbaImage};
 
-    let mut img = image::open("src/images/IMG_20230504_090659.bmp").unwrap_or_else(|e| {
-        panic!("Failed to open: {}", e);
-    });
+struct LoadedImage {
+    path: PathBuf,
+    original: RgbaImage,
+    displayed: RgbaImage,
+    texture: Option<TextureHandle>,
+    borders: Vec<Vec<(u32, u32)>>,
+    current_obj: usize,
+}
 
-    // Dimensoes
-    let (width, height) = img.dimensions();
+struct ImageBrowser {
+    images: Vec<LoadedImage>,
+    selected: usize,
+    status: String,
+}
 
-    //Para posterior comparacao 
-    println!("Dimensoes = {width} {height}");
-
-    // Grayscale
-    let mut cinza = img.to_luma8();
-
-    /* ====================================================================================================================================================================================================================
-    Algoritmo de otsu 
-    */
-    fn otsu(img_cinza: &mut GrayImage) {
-        let total_pixels = (img_cinza.width() * img_cinza.height()) as f64;
-
-        // 1. Histograma (frequência de cada nível de cinza)
-        let mut histogram = [0u64; 256];
-        for pixel in img_cinza.pixels() {
-            histogram[pixel[0] as usize] += 1;
+impl ImageBrowser {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self {
+            images: Vec::new(),
+            selected: 0,
+            status: "Nenhuma imagem carregada".to_owned(),
         }
+    }
 
-        // 2. Probabilidades (pi) e Média Global (Ut)
-        let mut pi = [0.0f64; 256];
-        let mut ut = 0.0f64;
-        for i in 0..256 {
-            pi[i] = histogram[i] as f64 / total_pixels;
-            ut += i as f64 * pi[i];
-        }
+    fn current(&self) -> Option<&LoadedImage> {
+        self.images.get(self.selected)
+    }
 
-        let mut w_k = 0.0f64; // Soma acumulada das probabilidades (w)
-        let mut u_k = 0.0f64; // Soma acumulada do produto nível * probabilidade (u)
-        let mut max_variance = -1.0f64;
-        let mut limiar = 0u8;
+    fn current_mut(&mut self) -> Option<&mut LoadedImage> {
+        self.images.get_mut(self.selected)
+    }
 
-        // 3. Busca do limiar k que maximiza a variância entre classes
-        for k in 0..256 {
-            w_k += pi[k];
-            u_k += k as f64 * pi[k];
+    fn load_images(&mut self, paths: Vec<PathBuf>) {
+        let mut loaded = Vec::new();
+        let mut errors = Vec::new();
 
-            let w_background = w_k;
-            let w_foreground = 1.0 - w_k;
-
-            // Intervalo efetivo: w(k) * (1 - w(k)) > 0
-            if w_background > 0.0 && w_foreground > 0.0 {
-                // Equação da variância entre classes: ((Ut * w - u)^2) / (w * (1 - w))
-                let numerator = ut * w_background - u_k;
-                let variance = (numerator * numerator) / (w_background * w_foreground);
-
-                // Mantém o comportamento do argmax (primeiro máximo encontrado)
-                if variance > max_variance {
-                    max_variance = variance;
-                    limiar = k as u8;
+        for path in paths {
+            match image::open(&path) {
+                Ok(image) => {
+                    let borders = process_image(&image);
+                    loaded.push(LoadedImage {
+                        path,
+                        original: image.to_rgba8(),
+                        displayed: image.to_rgba8(),
+                        texture: None,
+                        borders,
+                        current_obj: 0,
+                    });
                 }
+                Err(error) => errors.push(format!("{}: {error}", path.display())),
             }
         }
 
-        for pixel in img_cinza.pixels_mut() {
-            if pixel[0] > limiar {
-                pixel[0] = 0;
-            } else {
-                pixel[0] = 255;
-            }
-        }   
+        self.images = loaded;
+        self.selected = 0;
+        self.status = if errors.is_empty() {
+            format!("{} imagem(ns) carregada(s)", self.images.len())
+        } else {
+            format!(
+                "{} imagem(ns) carregada(s); falha ao abrir: {}",
+                self.images.len(),
+                errors.join("; ")
+            )
+        };
     }
-    otsu(&mut cinza);
-    
-    cinza.save_with_format("src/images/Limiarizado.bmp", ImageFormat::Bmp).ok();
 
-    let mut cinza_2 = GrayImage::from_pixel(width+2, height+2, Luma([0]));
-    
-    
-    /* ====================================================================================================================================================================================================================
-    Procedimento para extrair contornos, recebe uma imagem no formato GrayImage, altura e largura em u32.
-    Retorna a imagem resultante do processo de extracao de contornos: "a" - ("a" erodida por "b")
-    sendo "b" um elemento estruturante em cruz simulado por comparacao de coordenadas
-    */
-    fn border_mask(a: &mut GrayImage, b: &mut GrayImage, w: u32, h: u32){
-
-        let mut a_padded = GrayImage::from_pixel(w+2, h+2, Luma([0])); 
-
-        // Insercao da imagem a dentro do fundo de padding
-        for y in 1..(h+1) {
-            for x in 1..(w+1) {
-                a_padded.put_pixel(x,y, image::Luma([a.get_pixel(x-1,y-1).0[0]]));
-            }
+    fn reset_current(&mut self) {
+        if let Some(image) = self.current_mut() {
+            image.displayed = image.original.clone();
+            image.texture = None;
+            self.status = "Imagem restaurada".to_owned();
         }
-
-        let mut eroded_a = GrayImage::from_pixel(w+2, h+2, Luma([0])); 
-
-        //Erosao com elemento B em cruz
-        for y in 1..(h+1) {
-            for x in 1..(w+1) {
-                //Elemento B simulado por comparacao de coordenadas
-                if a_padded.get_pixel(x, y).0[0] == 255 &&  
-                   a_padded.get_pixel(x-1, y).0[0] == 255 && a_padded.get_pixel(x+1, y).0[0] == 255 && 
-                   a_padded.get_pixel(x,y-1).0[0] == 255 && a_padded.get_pixel(x, y+1).0[0] == 255
-                   { 
-                    eroded_a.put_pixel(x,y, image::Luma([255]));
-                }        
-            }
-        }
-    
-        eroded_a.save_with_format("src/images/Erodida.bmp", ImageFormat::Bmp).ok();
-        
-        //Diferença da imagem original
-        let iter = eroded_a.as_mut().iter_mut().zip(a_padded.as_raw().iter());
-
-        for (eroded_a, &a_padded) in iter {
-            if a_padded == 255 && *eroded_a == 0{
-                *eroded_a= 255;
-            } 
-            else{
-                *eroded_a=0;
-            }
-        }
-
-        eroded_a.save_with_format("src/images/Mascara.bmp", ImageFormat::Bmp).ok();
-
-        for y in 1..(h+1) {
-            for x in 1..(w+1) {
-                b.put_pixel(x,y, image::Luma([eroded_a.get_pixel(x-1,y-1).0[0]]));
-            }
-        }
-
     }
-    
-    border_mask(&mut cinza, &mut cinza_2, width, height); // Cria a mascara sobre a imagem cinza
 
-    let mut lista_coords: Vec<Vec<(u32, u32)>> = Vec::new(); // Lista de objetos
+    fn texture_for_current(&mut self, ctx: &egui::Context) -> Option<&TextureHandle> {
+        let image = self.current_mut()?;
 
-    /* ==================================================================================================================================================================================================================== 
-    Seguidor de bordas, recebe a imagem da máscara (grayscale/GrayImage), a imagem original, altura e largura
-    insere bordas na imagem original e retorna as listas de bordas encontradas
-    */ 
-     fn border_follower(imagem: &mut GrayImage, imagem2: &mut DynamicImage, w: u32, h: u32, lista_coords: &mut Vec<Vec<(u32, u32)>> ) {
+        if image.texture.is_none() {
+            let rgba = &image.displayed;
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let color_image = ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+            image.texture = Some(ctx.load_texture(
+                image.path.to_string_lossy(),
+                color_image,
+                TextureOptions::LINEAR,
+            ));
+        }
 
-        let width = w + 2;
-        let height = h + 2;
-        let mut visitado = vec![false; (width * height) as usize];
-        
-        let indice = |x: u32, y: u32| (y * width + x) as usize; 
-        
-        let dentro = |x: i32, y: i32| {
-            x >= 1 && x <= w as i32 && y >= 1 && y <= h as i32
+        image.texture.as_ref()
+    }
+
+    fn save_current(&mut self) {
+        let Some(image) = self.current() else {
+            return;
         };
 
-        let vizinhos: [(i32, i32); 8] = [
-            (-1, 0),  
-            (-1, -1), 
-            (0, -1),  
-            (1, -1),  
-            (1, 0),   
-            (1, 1),   
-            (0, 1),   
-            (-1, 1), 
-        ];
-        
-        for y in 1..h+1 { 
+        let Some(path) = rfd::FileDialog::new()
+            .set_file_name("imagem-processada.png")
+            .add_filter("PNG", &["png"])
+            .add_filter("JPEG", &["jpg", "jpeg"])
+            .save_file()
+        else {
+            return;
+        };
 
-            for x in 1..w+1 {
-                
-                if imagem.get_pixel(x, y).0[0] != 255 || visitado[indice(x, y)] { 
-                    continue;
-                }
+        let format = match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("jpg" | "jpeg") => ImageFormat::Jpeg,
+            _ => ImageFormat::Png,
+        };
 
-                let mut fila = vec![(x, y)];
-                visitado[indice(x, y)] = true; 
-                let mut upper_left = (x, y); 
-                let mut pos = 0; 
-
-                while pos < fila.len() { 
-
-                    let (atual_x, atual_y) = fila[pos];
-                    pos += 1;
-
-                    if (atual_y, atual_x) < (upper_left.1, upper_left.0) {  
-                        upper_left = (atual_x, atual_y); 
-                    }
-
-                    for &(dx, dy) in & vizinhos { 
-                        let nx = atual_x as i32 + dx; 
-                        let ny = atual_y as i32 + dy;
-
-                        if dentro(nx, ny) { 
-
-                            if imagem.get_pixel(nx as u32, ny as u32).0[0] == 255 
-                                && !visitado[indice(nx as u32, ny as u32)] 
-                            {
-                                visitado[indice(nx as u32, ny as u32)] = true; 
-                                fila.push((nx as u32, ny as u32));
-                            }
-                        }
-                    }
-                }
-
-                let mut borda = vec![upper_left]; 
-                let mut b = upper_left; // Pixel corrente
-                let mut c;
-
-                let primeiro = (0..8).find_map(|passo| {
-                    let nx = b.0 as i32 + vizinhos[passo as usize].0;
-                    let ny = b.1 as i32 + vizinhos[passo as usize].1;
-                    if dentro(nx, ny) && imagem.get_pixel(nx as u32, ny as u32).0[0] == 255 {
-                        let anterior = (passo + 7) % 8;
-                        Some((
-                            (nx as u32, ny as u32),
-                            (
-                                (b.0 as i32 + vizinhos[anterior].0) as u32,
-                                (b.1 as i32 + vizinhos[anterior].1) as u32,
-                            ),
-                        ))
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some((primeiro_b, primeiro_c)) = primeiro {
-                    b = primeiro_b;
-                    c = primeiro_c;
-                    borda.push(b);
-
-                    while b != upper_left {
-                        let indice_c = vizinhos
-                            .iter()
-                            .position(|&vizinho| {
-                                b.0 as i32 + vizinho.0 == c.0 as i32
-                                    && b.1 as i32 + vizinho.1 == c.1 as i32
-                            })
-                            .unwrap_or(0);
-
-                        let proximo = (0..8).find_map(|offset| {
-                            let passo = (indice_c + offset) % 8;
-                            let nx = b.0 as i32 + vizinhos[passo].0;
-                            let ny = b.1 as i32 + vizinhos[passo].1;
-                            if dentro(nx, ny)
-                                && imagem.get_pixel(nx as u32, ny as u32).0[0] == 255
-                            {
-                                let anterior = (passo + 7) % 8;
-                                Some((
-                                    (nx as u32, ny as u32),
-                                    (
-                                        (b.0 as i32 + vizinhos[anterior].0) as u32,
-                                        (b.1 as i32 + vizinhos[anterior].1) as u32,
-                                    ),
-                                ))
-                            } else {
-                                None
-                            }
-                        });
-
-                        let Some((proximo_b, proximo_c)) = proximo else {
-                            break;
-                        };
-                        c = proximo_c;
-                        b = proximo_b;
-                        borda.push(b);
-
-                        if borda.len() > (w as usize * h as usize) + 1 {
-                            break;
-                        }
-                    }
-                }
-
-                if borda.len()>300{
-                    for &(px, py) in &borda {
-                    imagem2.put_pixel(px - 1, py - 1, image::Rgba([255, 0, 0, 255]));
-                    }
-                    lista_coords.push(borda);
-                }   
-            }
+        match image.displayed.save_with_format(&path, format) {
+            Ok(()) => self.status = format!("Imagem salva em {}", path.display()),
+            Err(error) => self.status = format!("Erro ao salvar imagem: {error}"),
         }
     }
+}
 
-    border_follower(&mut cinza_2, &mut img, width, height, &mut lista_coords);
-    
-    img.save_with_format("src/images/Bordeada.bmp", ImageFormat::Bmp).ok();
+impl eframe::App for ImageBrowser {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Carregar imagens").clicked()
+                    && let Some(paths) = rfd::FileDialog::new()
+                        .add_filter("Imagens", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+                        .pick_files()
+                {
+                    self.load_images(paths);
+                }
 
-    for i in 0..lista_coords.len(){
-        let numero = lista_coords[i].len();
-        let index = i+1;
-        println!("Objeto {index}: {numero}");
+                let has_image = !self.images.is_empty();
+                ui.add_enabled_ui(has_image, |ui| {
+                    if ui.button("Anterior").clicked() {
+                        self.selected = self.selected.saturating_sub(1);
+                        self.images[self.selected].current_obj = 0;
+                    }
+                    if ui.button("Próxima").clicked() {
+                        self.selected = (self.selected + 1).min(self.images.len() - 1);
+                        self.images[self.selected].current_obj = 0;
+                    }
+
+                    if ui.button("Alternar Objeto").clicked() {
+                        let (_, selected_images) = self.images.split_at_mut(self.selected);
+                        let image = &mut selected_images[0];
+
+                        if !image.borders.is_empty() {
+                            let new_obj = (image.current_obj + 1) % image.borders.len();
+                            image.current_obj = new_obj;
+                            self.reset_current();
+                        }
+                    }
+                    if ui.button("Restaurar").clicked() {
+                        self.reset_current();
+                    }
+                    if ui.button("Salvar como...").clicked() {
+                        self.save_current();
+                    }
+                });
+            });
+        });
+
+        egui::SidePanel::left("image_list")
+            .resizable(true)
+            .default_width(220.0)
+            .show(ctx, |ui| {
+                ui.heading("Imagens");
+                ui.separator();
+
+                for (index, image) in self.images.iter().enumerate() {
+                    let name = image
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("imagem");
+                    if ui
+                        .selectable_label(self.selected == index, format!("{index}: {name}"))
+                        .clicked()
+                    {
+                        self.selected = index;
+                    }
+                }
+            });
+
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.label(&self.status);
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let Some(current) = self.current() else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Clique em “Carregar imagens” para começar.");
+                });
+                return;
+            };
+
+            let name = current
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("imagem");
+            let dimensions = current.displayed.dimensions();
+            ui.heading(format!(
+                "{} ({}/{})",
+                name,
+                self.selected + 1,
+                self.images.len()
+            ));
+            ui.label(format!("{} × {} px", dimensions.0, dimensions.1));
+            ui.separator();
+
+            
+
+            let (_, selected_images) = self.images.split_at_mut(self.selected);
+            let image = &mut selected_images[0];
+
+            if !image.borders.is_empty() {
+                let borders = &image.borders[image.current_obj];
+                for (x, y) in borders {
+                    image
+                        .displayed
+                        .put_pixel(*x, *y, image::Rgba([255, 0, 0, 255]));
+                }
+            }
+
+            if let Some(texture) = self.texture_for_current(ctx) {
+                let available = ui.available_size();
+                let image_size = texture.size_vec2();
+                let scale = (available.x / image_size.x)
+                    .min(available.y / image_size.y)
+                    .min(1.0);
+                ui.add(egui::Image::from_texture(texture).fit_to_exact_size(image_size * scale));
+            }
+        });
     }
+}
 
+fn main() -> eframe::Result {
+    eframe::run_native(
+        "Navegador de imagens",
+        eframe::NativeOptions::default(),
+        Box::new(|cc| Ok(Box::new(ImageBrowser::new(cc)))),
+    )
 }
