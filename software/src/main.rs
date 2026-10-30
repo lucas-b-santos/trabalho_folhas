@@ -3,7 +3,7 @@ pub mod pipeline;
 use pipeline::process_image;
 
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
-use image::{GenericImageView, ImageFormat, RgbaImage};
+use image::{ImageFormat, RgbaImage};
 
 struct LoadedImage {
     path: PathBuf,
@@ -18,6 +18,7 @@ struct ImageBrowser {
     images: Vec<LoadedImage>,
     selected: usize,
     status: String,
+    obj_info: String
 }
 
 impl ImageBrowser {
@@ -26,6 +27,7 @@ impl ImageBrowser {
             images: Vec::new(),
             selected: 0,
             status: "Nenhuma imagem carregada".to_owned(),
+            obj_info: "".to_owned()
         }
     }
 
@@ -59,7 +61,7 @@ impl ImageBrowser {
         }
 
         self.images = loaded;
-        self.selected = 0;
+        self.set_selected(0);
         self.status = if errors.is_empty() {
             format!("{} imagem(ns) carregada(s)", self.images.len())
         } else {
@@ -71,11 +73,37 @@ impl ImageBrowser {
         };
     }
 
+    fn set_selected(&mut self, index: usize) {
+        if index < self.images.len() {
+            self.selected = index;
+            self.set_obj(0);
+        }
+        self.reset_current();
+    }
+
+    fn set_obj(&mut self, obj: usize) {
+        if let Some(image) = self.current_mut() {
+            image.current_obj = obj;
+            if !image.borders.is_empty() {
+                let total_pixels = image.borders[obj].len();
+                self.obj_info = format!(
+                    "Objeto {}/{} ({} pixels)",
+                    obj + 1,
+                    image.borders.len(),
+                    total_pixels
+                );
+            } else {
+                self.obj_info = "Nenhum objeto detectado".to_owned();
+            }
+        } else {
+            self.obj_info = "".to_owned();
+        }
+    }
+
     fn reset_current(&mut self) {
         if let Some(image) = self.current_mut() {
             image.displayed = image.original.clone();
             image.texture = None;
-            self.status = "Imagem restaurada".to_owned();
         }
     }
 
@@ -142,27 +170,15 @@ impl eframe::App for ImageBrowser {
                 let has_image = !self.images.is_empty();
                 ui.add_enabled_ui(has_image, |ui| {
                     if ui.button("Anterior").clicked() {
-                        self.selected = self.selected.saturating_sub(1);
-                        self.images[self.selected].current_obj = 0;
+                        let new_selected = self.selected.saturating_sub(1);
+                        self.set_selected(new_selected);
                     }
                     if ui.button("Próxima").clicked() {
-                        self.selected = (self.selected + 1).min(self.images.len() - 1);
-                        self.images[self.selected].current_obj = 0;
+                        let new_selected = (self.selected + 1).min(self.images.len() - 1);
+                        self.set_selected(new_selected);
+                    
                     }
 
-                    if ui.button("Alternar Objeto").clicked() {
-                        let (_, selected_images) = self.images.split_at_mut(self.selected);
-                        let image = &mut selected_images[0];
-
-                        if !image.borders.is_empty() {
-                            let new_obj = (image.current_obj + 1) % image.borders.len();
-                            image.current_obj = new_obj;
-                            self.reset_current();
-                        }
-                    }
-                    if ui.button("Restaurar").clicked() {
-                        self.reset_current();
-                    }
                     if ui.button("Salvar como...").clicked() {
                         self.save_current();
                     }
@@ -177,6 +193,7 @@ impl eframe::App for ImageBrowser {
                 ui.heading("Imagens");
                 ui.separator();
 
+                let mut clicked_index = None;
                 for (index, image) in self.images.iter().enumerate() {
                     let name = image
                         .path
@@ -187,9 +204,14 @@ impl eframe::App for ImageBrowser {
                         .selectable_label(self.selected == index, format!("{index}: {name}"))
                         .clicked()
                     {
-                        self.selected = index;
+                        clicked_index = Some(index);
                     }
                 }
+
+                if let Some(index) = clicked_index {
+                    self.set_selected(index);
+                }
+
             });
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
@@ -210,16 +232,29 @@ impl eframe::App for ImageBrowser {
                 .and_then(|name| name.to_str())
                 .unwrap_or("imagem");
             let dimensions = current.displayed.dimensions();
+            let total_objs = current.borders.len();
             ui.heading(format!(
                 "{} ({}/{})",
                 name,
                 self.selected + 1,
                 self.images.len()
             ));
+
             ui.label(format!("{} × {} px", dimensions.0, dimensions.1));
+            ui.label(format!("Num. de Objetos: {}", total_objs));
+            ui.label(&self.obj_info);
             ui.separator();
 
-            
+            if ui.button("Alternar Objeto").clicked() {
+                let (_, selected_images) = self.images.split_at_mut(self.selected);
+                let image = &mut selected_images[0];
+
+                if !image.borders.is_empty() {
+                    let new_obj = (image.current_obj + 1) % image.borders.len();
+                    self.set_obj(new_obj);
+                    self.reset_current();
+                }
+            }
 
             let (_, selected_images) = self.images.split_at_mut(self.selected);
             let image = &mut selected_images[0];

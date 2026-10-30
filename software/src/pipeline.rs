@@ -233,7 +233,7 @@ fn border_follower(img: &GrayImage) -> Vec<Vec<(u32, u32)>> {
                 }
             }
 
-            if border.len() > 300 {
+            if border.len() > 500 {
                 objs_borders.push(border);
             }
         }
