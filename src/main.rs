@@ -1,10 +1,10 @@
 extern crate nalgebra as na;
 extern crate image;
-use image::{DynamicImage, ExtendedColorType::Rgb1, GenericImage, GenericImageView, GrayImage, ImageBuffer, ImageFormat, Luma, Rgb, codecs::pnm::ArbitraryTuplType::RGB, imageops};
+use image::{DynamicImage, GenericImage, GenericImageView, GrayImage, ImageFormat, Luma};
 
 fn main() {
 
-    let mut img = image::open("src/images/IMG_20230504_090854.bmp").unwrap_or_else(|e| {
+    let mut img = image::open("src/images/IMG_20230504_090659.bmp").unwrap_or_else(|e| {
         panic!("Failed to open: {}", e);
     });
 
@@ -86,7 +86,7 @@ fn main() {
     */
     fn border_mask(a: &mut GrayImage, b: &mut GrayImage, w: u32, h: u32){
 
-        let mut a_padded = GrayImage::from_pixel(w+2, h+2, Luma([0])); // Nova imagem preta
+        let mut a_padded = GrayImage::from_pixel(w+2, h+2, Luma([0])); 
 
         // Insercao da imagem a dentro do fundo de padding
         for y in 1..(h+1) {
@@ -95,7 +95,7 @@ fn main() {
             }
         }
 
-        let mut eroded_a = GrayImage::from_pixel(w+2, h+2, Luma([0])); // Nova imagem preta
+        let mut eroded_a = GrayImage::from_pixel(w+2, h+2, Luma([0])); 
 
         //Erosao com elemento B em cruz
         for y in 1..(h+1) {
@@ -103,9 +103,7 @@ fn main() {
                 //Elemento B simulado por comparacao de coordenadas
                 if a_padded.get_pixel(x, y).0[0] == 255 &&  
                    a_padded.get_pixel(x-1, y).0[0] == 255 && a_padded.get_pixel(x+1, y).0[0] == 255 && 
-                   a_padded.get_pixel(x,y-1).0[0] == 255 && a_padded.get_pixel(x, y+1).0[0] == 255 // &&
-                //    a_padded.get_pixel(x-1, y-1).0[0] == 255 && a_padded.get_pixel(x-1, y+1).0[0] == 255 && 
-                //    a_padded.get_pixel(x+1,y-1).0[0] == 255 && a_padded.get_pixel(x+1, y+1).0[0] == 255
+                   a_padded.get_pixel(x,y-1).0[0] == 255 && a_padded.get_pixel(x, y+1).0[0] == 255
                    { 
                     eroded_a.put_pixel(x,y, image::Luma([255]));
                 }        
@@ -128,8 +126,6 @@ fn main() {
 
         eroded_a.save_with_format("src/images/Mascara.bmp", ImageFormat::Bmp).ok();
 
-        // A imagem a recebe a mascara
-        // Insercao da imagem a dentro do fundo de padding
         for y in 1..(h+1) {
             for x in 1..(w+1) {
                 b.put_pixel(x,y, image::Luma([eroded_a.get_pixel(x-1,y-1).0[0]]));
@@ -140,58 +136,159 @@ fn main() {
     
     border_mask(&mut cinza, &mut cinza_2, width, height); // Cria a mascara sobre a imagem cinza
 
+    let mut lista_coords: Vec<Vec<(u32, u32)>> = Vec::new(); // Lista de objetos
+
     /* ==================================================================================================================================================================================================================== 
     Seguidor de bordas, recebe a imagem da máscara (grayscale/GrayImage), a imagem original, altura e largura
     insere bordas na imagem original e retorna as listas de bordas encontradas
     */ 
-    fn border_follower(imagem: &mut GrayImage, imagem2: &mut DynamicImage, w :u32, h :u32){
+     fn border_follower(imagem: &mut GrayImage, imagem2: &mut DynamicImage, w: u32, h: u32, lista_coords: &mut Vec<Vec<(u32, u32)>> ) {
 
-        let mut lista_coords: Vec<Vec<(u32,u32)>> = Vec::with_capacity(8); // Lista de listas
-
-        let mut counter; 
+        let width = w + 2;
+        let height = h + 2;
+        let mut visitado = vec![false; (width * height) as usize];
         
-        for y in 1..(h+1){ // Percorre a imagem
-            for x in 1..(w+1){
+        let indice = |x: u32, y: u32| (y * width + x) as usize; 
+        
+        let dentro = |x: i32, y: i32| {
+            x >= 1 && x <= w as i32 && y >= 1 && y <= h as i32
+        };
 
-                if imagem.get_pixel(x,y).0[0]==255{ // Pixel upper-left most
+        let vizinhos: [(i32, i32); 8] = [
+            (-1, 0),  
+            (-1, -1), 
+            (0, -1),  
+            (1, -1),  
+            (1, 0),   
+            (1, 1),   
+            (0, 1),   
+            (-1, 1), 
+        ];
+        
+        for y in 1..h+1 { 
 
-                    let mut border: Vec<(u32, u32)> = Vec::with_capacity(1000); 
-                    let coords_ini = (x,y);
-                    imagem2.put_pixel(x-1,y-1,image::Rgba::<u8>([255,0,0,255]));
-                    border.push(coords_ini); 
+            for x in 1..w+1 {
+                
+                if imagem.get_pixel(x, y).0[0] != 255 || visitado[indice(x, y)] { 
+                    continue;
+                }
 
-                    counter=0; 
+                let mut fila = vec![(x, y)];
+                visitado[indice(x, y)] = true; 
+                let mut upper_left = (x, y); 
+                let mut pos = 0; 
 
-                    let offsets_horario: [(u32, u32); 8] = [
-                        (x-1, y),
-                        (x-1, y-1), 
-                        (x, y-1),
-                        (x+1, y-1),
-                        (x+1, y), 
-                        (x+1, y+1), 
-                        (x, y+1), 
-                        (x-1, y+1)
-                    ];  
+                while pos < fila.len() { 
 
-                    for &(dx, dy) in &offsets_horario {
-                        if imagem.get_pixel(dx,dy).0[0]==255{
-                            counter+=1;
-                            imagem.put_pixel(x,y,image::Luma([0]));
-                            imagem2.put_pixel(x,y,image::Rgba::<u8>([255,0,0,255]));
-                            border.push((x,y));
+                    let (atual_x, atual_y) = fila[pos];
+                    pos += 1;
+
+                    if (atual_y, atual_x) < (upper_left.1, upper_left.0) {  
+                        upper_left = (atual_x, atual_y); 
+                    }
+
+                    for &(dx, dy) in & vizinhos { 
+                        let nx = atual_x as i32 + dx; 
+                        let ny = atual_y as i32 + dy;
+
+                        if dentro(nx, ny) { 
+
+                            if imagem.get_pixel(nx as u32, ny as u32).0[0] == 255 
+                                && !visitado[indice(nx as u32, ny as u32)] 
+                            {
+                                visitado[indice(nx as u32, ny as u32)] = true; 
+                                fila.push((nx as u32, ny as u32));
+                            }
                         }
-                        else if (dx,dy) == coords_ini && counter>300{ // Borda deve ser cíclia e ter mais de 300 pixels
+                    }
+                }
+
+                let mut borda = vec![upper_left]; 
+                let mut b = upper_left; // Pixel corrente
+                let mut c;
+
+                let primeiro = (0..8).find_map(|passo| {
+                    let nx = b.0 as i32 + vizinhos[passo as usize].0;
+                    let ny = b.1 as i32 + vizinhos[passo as usize].1;
+                    if dentro(nx, ny) && imagem.get_pixel(nx as u32, ny as u32).0[0] == 255 {
+                        let anterior = (passo + 7) % 8;
+                        Some((
+                            (nx as u32, ny as u32),
+                            (
+                                (b.0 as i32 + vizinhos[anterior].0) as u32,
+                                (b.1 as i32 + vizinhos[anterior].1) as u32,
+                            ),
+                        ))
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some((primeiro_b, primeiro_c)) = primeiro {
+                    b = primeiro_b;
+                    c = primeiro_c;
+                    borda.push(b);
+
+                    while b != upper_left {
+                        let indice_c = vizinhos
+                            .iter()
+                            .position(|&vizinho| {
+                                b.0 as i32 + vizinho.0 == c.0 as i32
+                                    && b.1 as i32 + vizinho.1 == c.1 as i32
+                            })
+                            .unwrap_or(0);
+
+                        let proximo = (0..8).find_map(|offset| {
+                            let passo = (indice_c + offset) % 8;
+                            let nx = b.0 as i32 + vizinhos[passo].0;
+                            let ny = b.1 as i32 + vizinhos[passo].1;
+                            if dentro(nx, ny)
+                                && imagem.get_pixel(nx as u32, ny as u32).0[0] == 255
+                            {
+                                let anterior = (passo + 7) % 8;
+                                Some((
+                                    (nx as u32, ny as u32),
+                                    (
+                                        (b.0 as i32 + vizinhos[anterior].0) as u32,
+                                        (b.1 as i32 + vizinhos[anterior].1) as u32,
+                                    ),
+                                ))
+                            } else {
+                                None
+                            }
+                        });
+
+                        let Some((proximo_b, proximo_c)) = proximo else {
+                            break;
+                        };
+                        c = proximo_c;
+                        b = proximo_b;
+                        borda.push(b);
+
+                        if borda.len() > (w as usize * h as usize) + 1 {
                             break;
                         }
                     }
-                    lista_coords.push(border);
                 }
+
+                if borda.len()>300{
+                    for &(px, py) in &borda {
+                    imagem2.put_pixel(px - 1, py - 1, image::Rgba([255, 0, 0, 255]));
+                    }
+                    lista_coords.push(borda);
+                }   
             }
         }
     }
 
-    border_follower(&mut cinza_2, &mut img, width, height);
+    border_follower(&mut cinza_2, &mut img, width, height, &mut lista_coords);
     
     img.save_with_format("src/images/Bordeada.bmp", ImageFormat::Bmp).ok();
+
+    for i in 0..lista_coords.len(){
+        let numero = lista_coords[i].len();
+        let index = i+1;
+        println!("Objeto {index}: {numero}");
+    }
 
 }
